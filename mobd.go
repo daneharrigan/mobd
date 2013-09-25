@@ -2,65 +2,46 @@ package main
 
 import (
 	"bufio"
-	"errors"
 	"github.com/kr/logfmt"
 	"log"
 	"os"
 )
 
-var (
-	payload []byte
-	size    chan bool
-	fwd     chan bool
-	max     int
-)
-
-func init() {
-	size = make(chan bool)
-	fwd = make(chan bool)
-	max = 1000
+type stream struct {
+	Forward bool
 }
 
-type stream struct{}
-
 func (s *stream) HandleLogfmt(k, v []byte) error {
-	return errors.New("no metrics found")
+	switch string(k) {
+	case "sample#memory_total":
+		s.Forward = false
+	case "sample#cpu_load_avg1m":
+		s.Forward = false
+	}
+
+	return nil
 }
 
 func main() {
 	log.SetPrefix("app=mobd ")
 	log.SetFlags(0)
-
-	go forward()
-	go verify()
+	log.Println("at=start")
 
 	sc := bufio.NewScanner(os.Stdin)
 	st := new(stream)
 
 	for {
-		log.Println("at=scan")
 		sc.Scan()
+		st.Forward = true
+
 		if err := logfmt.Unmarshal(sc.Bytes(), st); err != nil {
-			payload = append(payload, sc.Bytes()...)
-			size <- true
+			log.Printf("at=scan error=%q", err)
+		}
+
+		if st.Forward {
+			os.Stdout.Write(append(sc.Bytes(), '\n'))
 		}
 	}
-}
 
-func verify() {
-	for {
-		select {
-		case <-size:
-			if len(payload) >= max {
-				fwd <- true
-			}
-		}
-	}
-}
-
-func forward() {
-	for _ = range fwd {
-		log.Printf("%d", len(payload))
-		payload = payload[:0]
-	}
+	log.Println("at=finish")
 }
